@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --primary: #004098; --success: #28a745; --bg: #f0f2f5; }
+    body { font-family: sans-serif; background: var(--bg); margin: 0; padding-bottom: 50px; color: #333; }
+    .header { background: var(--primary); color: white; text-align: center; padding: 20px 10px; margin-bottom: 20px; }
+    .container { max-width: 600px; margin: 0 auto; padding: 0 15px; }
+    .card { background: white; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .section-title { font-size: 1.1rem; border-left: 5px solid var(--primary); padding-left: 10px; margin-bottom: 10px; font-weight: bold; }
+    input, select { width: 100%; padding: 12px; margin: 5px 0 15px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
+    .radio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+    .radio-grid input { display: none; }
+    .radio-grid span { display: block; padding: 12px; text-align: center; border: 1px solid #ddd; border-radius: 8px; cursor: pointer; }
+    .radio-grid input:checked + span { background: var(--primary); color: white; border-color: var(--primary); }
+    .btn { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; }
+    .btn-primary { background: var(--primary); color: white; margin-bottom: 10px; }
+    .btn-success { background: var(--success); color: white; }
+    .rank-table { width: 100%; border-collapse: collapse; }
+    .rank-table td { padding: 10px; border-bottom: 1px solid #eee; }
+  </style>
+</head>
+<body>
+<div class="header"><h1 id="viewTitle">スコア入力フォーム</h1></div>
+<div class="container" id="mainContainer">接続中...</div>
+
+<script>
+let config = {};
+const page = "<?= page ?>"; 
+
+window.onload = () => {
+  google.script.run.withSuccessHandler(data => { config = data; renderPage(); }).getInitialData(page);
+};
+
+function renderPage() {
+  const container = document.getElementById('mainContainer');
+  const titleEl = document.getElementById('viewTitle');
+
+  if (page === 'ranking') {
+    titleEl.innerText = "現在のランキング";
+    renderRanking(container);
+  } else if (page === 'admin') {
+    titleEl.innerText = "運営用管理画面";
+    renderAdmin(container);
+  } else {
+    if (config.isLocked) {
+      titleEl.innerText = "現在のランキング";
+      renderRanking(container); 
+    } else {
+      titleEl.innerText = "スコア入力フォーム";
+      renderIndex(container);
+    }
+  }
+}
+
+function renderAdmin(container) {
+  const list = config.adminData.incompleteTeams;
+  if (list.length === 0) {
+    container.innerHTML = `<div class="card" style="text-align:center; color:var(--success); font-weight:bold;">🎉 全ての班の入力が完了しました！</div>`;
+    return;
+  }
+
+  let html = `
+    <div class="card">
+      <div class="section-title">未入力の班（残り ${list.length} 班）</div>
+      <table class="rank-table">
+        <thead>
+          <tr style="background:#eee; font-size:0.8rem;">
+            <td style="padding:5px;">班</td><td style="padding:5px;">担当者</td><td style="padding:5px;">班名</td>
+          </tr>
+        </thead>
+        <tbody>`;
+  
+  list.forEach(t => {
+    html += `<tr>
+      <td>${t.num}班</td>
+      <td style="color:var(--primary); font-weight:bold;">${t.staff}</td>
+      <td style="font-size:0.85rem;">${t.name}</td>
+    </tr>`;
+  });
+
+  container.innerHTML = html + `</tbody></table></div>`;
+}
+
+function renderRanking(container) {
+  let html = `<div class="card"><div class="section-title">🏆 暫定順位（${config.currentSheet}）</div><table class="rank-table">`;
+  config.rankingData.forEach((r, i) => {
+    html += `<tr><td>${i+1}位</td><td>${r.num}班</td><td>${r.name}</td><td>${r.score}点</td></tr>`;
+  });
+  container.innerHTML = html + `</table></div>`;
+}
+
+
+function renderIndex(container) {
+  container.innerHTML = `
+    <div class="card">
+      <label>1. 班番号を選択</label>
+      <select id="teamNum" onchange="onSelectTeam()">
+        <option value="">選択</option>
+        ${config.teams.map(t => `<option value="${t}">${t}班</option>`).join('')}
+      </select>
+      <div id="staffInfo" style="margin-top:10px; color:var(--primary); font-weight:bold; font-size:0.9rem;"></div>
+    </div>
+
+    <div id="formArea" style="display:none;">
+      <div id="step1" class="card">
+        <div class="section-title">2. 人数入力</div>
+        <input type="number" id="teamCount" inputmode="numeric">
+        <button id="btnStep1" class="btn btn-primary" onclick="saveCount()">次へ</button>
+      </div>
+
+      <div id="step2" class="card" style="display:none;">
+        <div class="section-title">3. 班の情報</div>
+        <label>班名</label><input type="text" id="teamName">
+        <label>ふりがな</label><input type="text" id="ruby">
+        <button class="btn btn-primary" onclick="document.getElementById('step3').style.display='block'">次へ</button>
+      </div>
+
+      <div id="step3" style="display:none;">
+        <div id="dynamicQuizArea"></div>
+        <button class="btn btn-success" onclick="submitAll()">保存して終了</button>
+      </div>
+    </div>
+  `;
+
+  const area = document.getElementById('dynamicQuizArea');
+  let currentSection = "";
+  let html = "";
+
+  config.quizDefinitions.forEach((q, index) => {
+    if (q.section !== currentSection) {
+      if (currentSection !== "") html += `</div>`;
+      html += `<div class="card"><div class="section-title">${q.section}</div>`;
+      currentSection = q.section;
+    }
+
+    if (q.type === 'input') {
+      html += `
+        <label>${q.question} (${q.minScore}〜${q.maxScore}点)</label>
+        <input type="number" name="q_${index}" data-type="input" value="0">
+      `;
+    } else {
+      const penaltyLabel = (q.penalty && q.penalty !== 0) ? ` (不正解の場合：${q.penalty}点)` : "";
+      
+      html += `
+        <label>${q.question} (${q.score}点)${penaltyLabel}</label>
+        <div class="radio-grid">
+          <label>
+            <input type="radio" name="q_${index}" value="${q.score}">
+            <span>○</span>
+          </label>
+          <label>
+            <input type="radio" name="q_${index}" value="${q.penalty}">
+            <span>×</span>
+          </label>
+        </div>
+      `;
+    }
+  });
+
+  html += `</div>`;
+  area.innerHTML = html;
+}
+
+function onSelectTeam() {
+  const num = document.getElementById('teamNum').value;
+  const formArea = document.getElementById('formArea');
+  const staffInfo = document.getElementById('staffInfo');
+  
+  if (!num) {
+    formArea.style.display = 'none';
+    staffInfo.innerText = "";
+    return;
+  }
+
+  document.getElementById('teamCount').value = "";
+  document.getElementById('teamName').value = "";
+  document.getElementById('ruby').value = "";
+
+
+  config.quizDefinitions.forEach((q, i) => {
+    const elements = document.getElementsByName(`q_${i}`);
+    if (elements.length > 0) {
+      if (q.type === 'input') {
+        elements[0].value = 0;
+      } else {
+        for (let r of elements) {
+          r.checked = false;
+        }
+      }
+    }
+  });
+
+  document.getElementById('step2').style.display = 'none';
+  document.getElementById('step3').style.display = 'none';
+
+  const data = config.allTeamData[num];
+  if (!data) return;
+
+  formArea.style.display = 'block';
+  staffInfo.innerText = data.staffName ? `担当：${data.staffName} さん` : "担当：未設定";
+  
+  document.getElementById('teamCount').value = data.count || "";
+  document.getElementById('teamName').value = data.teamName || "";
+  document.getElementById('ruby').value = data.ruby || "";
+  
+  const btnStep1 = document.getElementById('btnStep1');
+  const step2 = document.getElementById('step2');
+  
+  if (data.count) {
+    btnStep1.style.display = 'none';
+    step2.style.display = 'block';
+  } else {
+    btnStep1.style.display = 'block';
+    step2.style.display = 'none';
+  }
+
+  if (data.scores) {
+    config.quizDefinitions.forEach((q, i) => {
+      const val = data.scores[i];
+      const elements = document.getElementsByName(`q_${i}`);
+      
+      if (elements.length > 0) {
+        if (q.type === 'input') {
+          elements[0].value = (val !== undefined && val !== "") ? val : 0;
+        } else {
+          setRadioValue(`q_${i}`, val);
+        }
+      }
+    });
+  }
+}
+
+function submitAll() {
+  const num = document.getElementById('teamNum').value;
+  const scores = [];
+  let totalScore = 0;
+
+  config.quizDefinitions.forEach((q, i) => {
+    let val = 0;
+    if (q.type === 'input') {
+      val = Number(document.getElementsByName(`q_${i}`)[0].value) || 0;
+    } else {
+      const el = Array.from(document.getElementsByName(`q_${i}`)).find(r => r.checked);
+      val = el ? Number(el.value) : 0;
+    }
+    scores.push(val);
+    totalScore += val;
+  });
+
+  const payload = { 
+    count: document.getElementById('teamCount').value, 
+    teamName: document.getElementById('teamName').value, 
+    ruby: document.getElementById('ruby').value, 
+    scores: scores, 
+    totalScore: totalScore 
+  };
+  
+  google.script.run.withSuccessHandler(() => { 
+    alert("保存しました！"); 
+    location.reload(); 
+  }).updateData(num, payload);
+}
+
+function renderRanking(container) {
+  if (!config.rankingData || config.rankingData.length === 0) {
+    container.innerHTML = `<div class="card">まだ集計データがありません。</div>`;
+    return;
+  }
+
+  let html = `<div class="card"><div class="section-title">🏆 暫定順位（${config.currentSheet}）</div><table class="rank-table">`;
+  
+  config.rankingData.forEach((r, i) => {
+    html += `
+      <tr>
+        <td style="width:50px;">${i+1}位</td>
+        <td style="width:60px;">${r.num}班</td>
+        <td>${r.name || "（未設定）"}</td>
+        <td style="text-align:right; font-weight:bold;">${r.score}点</td>
+      </tr>`;
+  });
+
+  container.innerHTML = html + `</table></div>`;
+}
+
+function saveCount() {
+  const n = document.getElementById('teamNum').value;
+  const c = document.getElementById('teamCount').value;
+  
+  if (!c) {
+    alert("人数を入力してください");
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(() => { 
+      document.getElementById('step2').style.display = 'block'; 
+      alert("人数を保存しました"); 
+    })
+    .withFailureHandler(err => {
+      alert("保存エラー: " + err.message);
+    })
+    .updateTeamCount(n, c);
+}
+
+
+function setRadioValue(name, value) {
+  const rs = document.getElementsByName(name);
+  for (let r of rs) {
+    r.checked = false; 
+    if (value !== "" && value !== null && Number(r.value) === Number(value)) {
+      r.checked = true;
+    }
+  }
+}
+</script>
+</body>
+</html>
